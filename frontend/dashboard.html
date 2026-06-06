@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SecureLedger — Dashboard</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&displays=swap"
+      rel="stylesheet"
+    />
+    <link href="dashboard.css" rel="stylesheet">
+
+  </head>
+  <body>
+    <nav>
+      <div class="nav-logo">
+        <div class="nav-logo-icon">🔐</div>
+        <div class="nav-logo-name">Secure<span>Ledger</span></div>
+      </div>
+      <div class="nav-right">
+        <div class="nav-avatar" id="navAvatar">A</div>
+        <div class="nav-name" id="navName">—</div>
+        <button class="btn-logout" onclick="logout()">Sign Out</button>
+      </div>
+    </nav>
+
+    <main>
+      <!-- BALANCE HERO -->
+      <div class="balance-hero">
+        <div class="balance-left">
+          <div class="balance-label">Available Balance</div>
+          <div class="balance-amount">
+            <span class="currency">PKR</span>
+            <span id="balanceAmount">—</span>
+          </div>
+          <div class="balance-user">
+            Account holder: <strong id="userName">—</strong>
+          </div>
+        </div>
+        <div class="balance-right">
+          <div class="balance-badge">Active Account</div>
+        </div>
+      </div>
+
+      <div class="analytics-grid">
+        <div class="card">
+          <div class="card-title">
+            <div class="card-title-dot"></div>
+            Spend / Receive Trend
+          </div>
+          <canvas id="spendingTrendChart"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <div class="card-title-dot"></div>
+            Transaction Status Breakdown
+          </div>
+          <canvas id="statusChart"></canvas>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <!-- SEND MONEY -->
+        <div class="card">
+          <div class="card-title">
+            <div class="card-title-dot"></div>
+            Send Money
+          </div>
+          <div id="transferAlert" class="alert"></div>
+
+          <div class="field">
+            <label>Recipient</label>
+            <div class="recipient-wrap">
+              <input
+                type="text"
+                id="recipientSearch"
+                placeholder="Search by name or email..."
+                autocomplete="off"
+                oninput="searchUsers(this.value)"
+                onfocus="searchUsers(this.value)"
+              />
+              <input type="hidden" id="receiverId" />
+              <div id="searchDropdown"></div>
+              <div id="selectedUser">
+                <span id="selectedUserName"></span>
+                <span class="clear-btn" onclick="clearRecipient()">✕</span>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <label>Amount (PKR)</label>
+            <input type="number" id="amount" placeholder="0.00" min="1" />
+          </div>
+          <div class="field">
+            <label>Note (optional)</label>
+            <input
+              type="text"
+              id="description"
+              placeholder="Rent, groceries..."
+            />
+          </div>
+          <button class="btn-send" onclick="sendMoney()">Send Money →</button>
+        </div>
+
+        <!-- STATS -->
+        <div class="card">
+          <div class="card-title">
+            <div class="card-title-dot"></div>
+            Overview
+          </div>
+          <div class="stat-item">
+            <div class="stat-lbl">Total Sent</div>
+            <div class="stat-val red" id="statSent">PKR 0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-lbl">Total Received</div>
+            <div class="stat-val green" id="statReceived">PKR 0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-lbl">Transactions</div>
+            <div class="stat-val" id="statCount">0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-lbl">Fraud Flags</div>
+            <div class="stat-val red" id="statFlags">0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- HISTORY -->
+      <div class="history-card">
+        <div class="history-header">
+          <div class="card-title" style="margin: 0">
+            <div class="card-title-dot"></div>
+            Transaction History
+          </div>
+        </div>
+        <div id="historyList">
+          <div class="empty">Loading transactions...</div>
+        </div>
+      </div>
+    </main>
+
+    <!-- TRANSFER ANIMATION MODAL -->
+    <div id="transferModal" class="transfer-modal">
+      <div class="transfer-container">
+        <button class="transfer-close" onclick="closeTransferModal()">✕</button>
+        <div class="transfer-header">
+          <div class="transfer-title">Transferring Money</div>
+          <div class="transfer-subtitle" id="transferSubtitle">Processing your payment...</div>
+        </div>
+
+        <div class="transfer-flow">
+          <div class="transfer-party transfer-sender">
+            <div class="transfer-avatar" id="senderAvatar">S</div>
+            <div class="transfer-name" id="senderName">You</div>
+            <div class="transfer-email" id="senderEmail">your@email.com</div>
+          </div>
+
+          <div class="transfer-connector">
+            <div class="money-icon">💰</div>
+          </div>
+
+          <div class="transfer-party transfer-receiver">
+            <div class="transfer-avatar" id="receiverAvatar">R</div>
+            <div class="transfer-name" id="receiverName">Recipient</div>
+            <div class="transfer-email" id="receiverEmail">recipient@email.com</div>
+          </div>
+        </div>
+
+        <div class="transfer-amount">
+          <div class="amount-label">Amount Transferred</div>
+          <div class="amount-value">
+            <span class="amount-currency">₨</span>
+            <span id="transferAmount">0</span>
+          </div>
+        </div>
+
+        <div class="transfer-status" id="transferStatus">
+          <div class="status-icon">⏳</div>
+          <div class="status-text" id="statusText">Verifying transaction...</div>
+        </div>
+
+        <button class="transfer-button" id="transferDoneBtn" onclick="closeTransferModal()" style="display:none">Done</button>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="dashboard.js"></script>
+  </body>
+</html>

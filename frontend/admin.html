@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SecureLedger — Admin</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link href="admin.css" rel="stylesheet" />
+
+  </head>
+  <body>
+    <nav>
+      <div style="display: flex; align-items: center; gap: 12px">
+        <div class="nav-logo">
+          <div class="nav-logo-icon">🔐</div>
+          <div class="nav-logo-name">Secure<span>Ledger</span></div>
+        </div>
+        <div class="admin-pill">Admin</div>
+      </div>
+      <div class="nav-right">
+        <span
+          style="font-size: 13px; font-weight: 600; color: var(--text2)"
+          id="adminName"
+          >—</span
+        >
+        <button class="btn-logout" onclick="logout()">Sign Out</button>
+      </div>
+    </nav>
+
+    <main>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-card-label">Unreviewed Alerts</div>
+          <div class="stat-card-value red" id="statAlerts">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Total Users</div>
+          <div class="stat-card-value warn" id="statUsers">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Active Users</div>
+          <div class="stat-card-value green" id="statActive">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Flagged Users</div>
+          <div class="stat-card-value" id="statFlagged">—</div>
+        </div>
+      </div>
+
+      <div class="analytics-grid">
+        <div class="chart-card">
+          <div class="chart-card-title">Fraud Alerts Trend</div>
+          <canvas id="fraudTrendChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">Fraud Alerts by Severity</div>
+          <canvas id="fraudSeverityChart"></canvas>
+        </div>
+      </div>
+
+      <div class="page-tabs">
+        <button class="page-tab active" onclick="switchPanel('Alerts', this)">
+          Fraud Alerts
+        </button>
+        <button class="page-tab" onclick="switchPanel('Users', this)">
+          Users
+        </button>
+        <button class="page-tab" onclick="switchPanel('Audit', this)">
+          Audit Log
+        </button>
+      </div>
+
+      <div id="panelAlerts" class="tab-panel active">
+        <div class="table-wrap">
+          <div class="table-hdr">
+            <div class="table-title">
+              <div class="title-dot warn"></div>
+              Fraud Alerts
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Reason</th>
+                <th>Severity</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="alertsBody">
+              <tr>
+                <td colspan="6" class="empty">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="panelUsers" class="tab-panel">
+        <div class="table-wrap">
+          <div class="table-hdr">
+            <div class="table-title">
+              <div class="title-dot"></div>
+              All Users
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Balance</th>
+                <th>Fraud Flags</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="usersBody">
+              <tr>
+                <td colspan="6" class="empty">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="panelAudit" class="tab-panel">
+        <div class="table-wrap">
+          <div class="table-hdr">
+            <div class="table-title">
+              <div class="title-dot"></div>
+              Audit Log
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Actor</th>
+                <th>Action</th>
+                <th>Target</th>
+                <th>Notes</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="auditBody">
+              <tr>
+                <td colspan="5" class="empty">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="admin.js"></script>
+  </body>
+</html>
