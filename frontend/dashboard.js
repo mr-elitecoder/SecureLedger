@@ -1,12 +1,13 @@
-const API = "/api";
+const API = "http://localhost:5000/api";
 const token = localStorage.getItem("token");
 const user = JSON.parse(localStorage.getItem("user") || "null");
 if (!token || !user) window.location.href = "index.html";
 
-document.getElementById("navName").textContent = user.full_name;
-document.getElementById("navAvatar").textContent = user.full_name
-  .charAt(0)
-  .toUpperCase();
+document.getElementById("navName").textContent = user.FULL_NAME;
+// Modern syntax (Node.js 14+, modern browsers)
+document.getElementById("navAvatar").textContent =
+  user?.full_name?.[0]?.toUpperCase() || ":)";
+
 document.getElementById("userName").textContent = user.full_name;
 document.getElementById("balanceAmount").textContent = Number(
   user.balance,
@@ -20,41 +21,67 @@ const headers = {
 let spendingTrendChart, statusChart;
 
 // ── Search ──
-let searchTimeout = null;
-
 async function searchUsers(query) {
-  clearTimeout(searchTimeout);
   const dd = document.getElementById("searchDropdown");
-  searchTimeout = setTimeout(async () => {
-    try {
-      const url =
-        query.length >= 2
-          ? `${API}/users/search?q=${encodeURIComponent(query)}`
-          : `${API}/users/list`;
-      const res = await fetch(url, { headers });
-      const data = await res.json();
-      if (data.success) renderDropdown(data.users);
-    } catch {}
-  }, 200);
+  dd.style.display = "block";
+
+  try {
+    const url = `${API}/users/list`;
+    console.log(url);
+    console.log("Fetching users from:", url);
+    console.log("Headers:", headers);
+
+    const res = await fetch(url, { headers });
+    console.log("Response status:", res.status);
+
+    const data = await res.json();
+    console.log("Response data:", data);
+
+    if (data.success && data.users) {
+      console.log("Found users:", data.users);
+      if (query && query.length >= 2) {
+        // Filter locally for search
+        const filtered = data.users.filter(
+          (u) =>
+            u.full_name.toLowerCase().includes(query.toLowerCase()) ||
+            u.email.toLowerCase().includes(query.toLowerCase()),
+        );
+        console.log(filtered);
+        renderDropdown(filtered);
+      } else {
+        renderDropdown(data.users);
+      }
+    } else {
+      console.log("No users returned from API");
+      dd.innerHTML =
+        '<div class="drop-item"><div class="drop-item-name" style="color:var(--muted)">No users found</div></div>';
+    }
+  } catch (err) {
+    console.error("Error fetching users:", err);
+    dd.innerHTML =
+      '<div class="drop-item"><div class="drop-item-name" style="color:var(--muted)">Error loading users</div></div>';
+  }
 }
 
 function renderDropdown(users) {
   const dd = document.getElementById("searchDropdown");
   dd.style.display = "block";
-  if (!users.length) {
+
+  console.log("Rendering dropdown with users:", users);
+
+  if (!users || users.length === 0) {
     dd.innerHTML =
       '<div class="drop-item"><div class="drop-item-name" style="color:var(--muted)">No users found</div></div>';
     return;
   }
+
   dd.innerHTML = users
     .map(
       (u) => `
-            <div class="drop-item" onclick="selectUser(${
-              u.user_id
-            },'${u.full_name.replace(/'/g, "\\'")}','${u.email}')">
-                <div class="drop-item-name">${u.full_name}</div>
-                <div class="drop-item-email">${u.email}</div>
-            </div>`,
+    <div class="drop-item" onclick="selectUser(${u.user_id},'${u.full_name.replace(/'/g, "\\'")}','${u.email}')">
+      <div class="drop-item-name">${u.full_name}</div>
+      <div class="drop-item-email">${u.email}</div>
+    </div>`,
     )
     .join("");
 }
@@ -86,64 +113,102 @@ async function loadHistory() {
       headers,
     });
     const data = await res.json();
+
+    // console.log("hey here it is ", data.transactions);
+
     if (!data.success) return;
-    const txns = data.transactions;
-    const list = document.getElementById("historyList");
-
-    if (!txns.length) {
-      list.innerHTML =
-        '<div class="empty">No transactions yet. Send your first payment!</div>';
-      return;
-    }
-
-    let sent = 0,
-      received = 0;
-    txns.forEach((t) => {
-      if (t.direction === "sent") sent += Number(t.amount);
-      else received += Number(t.amount);
-    });
-    document.getElementById("statSent").textContent =
-      "PKR " + sent.toLocaleString();
-    document.getElementById("statReceived").textContent =
-      "PKR " + received.toLocaleString();
-    document.getElementById("statCount").textContent = txns.length;
-
-    list.innerHTML = txns
-      .map((t) => {
-        const isFlagged = t.status === "flagged";
-        const cls = isFlagged ? "flagged" : t.direction;
-        const icon = isFlagged ? "⚠" : t.direction === "sent" ? "↑" : "↓";
-        const sign = t.direction === "sent" ? "−" : "+";
-        const date = new Date(t.created_at).toLocaleString("en-PK", {
-          dateStyle: "medium",
-          timeStyle: "short",
-        });
-        return `
-                <div class="txn-row">
-                    <div class="txn-left">
-                        <div class="txn-icon ${cls}">${icon}</div>
-                        <div>
-                            <div class="txn-name">${t.counterparty}</div>
-                            <div class="txn-date">${date}${
-                              t.fraud_reason ? " · ⚠ " + t.fraud_reason : ""
-                            }</div>
-                        </div>
-                    </div>
-                    <div class="txn-right">
-                        <div class="txn-amount ${
-                          t.direction === "sent" ? "sent" : "received"
-                        }">${sign} PKR ${Number(
-                          t.amount,
-                        ).toLocaleString()}</div>
-                        <span class="txn-status ${t.status}">${t.status}</span>
-                    </div>
-                </div>`;
-      })
-      .join("");
+    renderTransactionList(data.transactions);
   } catch {
     document.getElementById("historyList").innerHTML =
       '<div class="empty">Failed to load history.</div>';
   }
+}
+
+async function searchTransactions(query) {
+  if (query.length < 2) {
+    loadHistory();
+    return;
+  }
+  try {
+    const res = await fetch(
+      `${API}/transactions/search?q=${encodeURIComponent(query)}`,
+      {
+        headers,
+      },
+    );
+    const data = await res.json();
+    if (!data.success) return;
+    renderTransactionList(data.transactions);
+  } catch (err) {
+    console.error("Transaction search error:", err.message);
+  }
+}
+
+function renderTransactionList(txns) {
+  const list = document.getElementById("historyList");
+
+  console.log(txns.length);
+
+  if (!txns.length) {
+    list.innerHTML = '<div class="empty">No transactions found.</div>';
+    return;
+  }
+
+  let sent = 0,
+    received = 0;
+  txns.forEach((t) => {
+    if (t.DIRECTION === "sent") sent += Number(t.AMOUNT);
+    else received += Number(t.AMOUNT);
+  });
+  document.getElementById("statSent").textContent =
+    "PKR " + sent.toLocaleString();
+
+  console.log(
+    (document.getElementById("statSent").textContent =
+      "PKR " + sent.toLocaleString()),
+  );
+
+  document.getElementById("statReceived").textContent =
+    "PKR " + received.toLocaleString();
+
+  console.log(
+    (document.getElementById("statReceived").textContent =
+      "PKR " + received.toLocaleString()),
+  );
+  document.getElementById("statCount").textContent = txns.length;
+
+  list.innerHTML = txns
+    .map((t) => {
+      const isFlagged = t.STATUS === "flagged";
+      const isOutgoing = t.DIRECTION === "sent";
+      const cls = isFlagged ? "flagged" : isOutgoing ? "sent" : "received";
+      const icon = isFlagged ? "⚠" : isOutgoing ? "↑" : "↓";
+      const sign = isOutgoing ? "−" : "+";
+      const date = new Date(t.CREATED_AT).toLocaleString("en-PK", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+      const counterparty = t.COUNTERPARTY || "Unknown";
+      return `
+                <div class="txn-row">
+                    <div class="txn-left">
+                        <div class="txn-icon ${cls}">${icon}</div>
+                        <div>
+                            <div class="txn-name">${counterparty}</div>
+                            <div class="txn-date">${date}</div>
+                        </div>
+                    </div>
+                    <div class="txn-right">
+                        <div class="txn-amount ${
+                          isOutgoing ? "sent" : "received"
+                        }">${sign} PKR ${Number(
+                          t.AMOUNT,
+                        ).toLocaleString()}</div>
+                        <span class="txn-status ${t.STATUS}">${t.STATUS}</span>
+                    </div>
+                </div>`;
+    })
+    .join("");
 }
 
 async function loadUserSummary() {
@@ -321,14 +386,12 @@ function showTransferAnimation(receiverName, receiverEmail, amount) {
   const modal = document.getElementById("transferModal");
   document.getElementById("senderName").textContent = user.full_name;
   document.getElementById("senderEmail").textContent = user.email;
-  document.getElementById("senderAvatar").textContent = user.full_name
-    .charAt(0)
-    .toUpperCase();
+  document.getElementById("senderAvatar").textContent =
+    user.full_name?.[0].toUpperCase();
   document.getElementById("receiverName").textContent = receiverName;
   document.getElementById("receiverEmail").textContent = receiverEmail;
-  document.getElementById("receiverAvatar").textContent = receiverName
-    .charAt(0)
-    .toUpperCase();
+  document.getElementById("receiverAvatar").textContent =
+    receiverName?.[0].toUpperCase();
   document.getElementById("transferAmount").textContent =
     Number(amount).toLocaleString();
   document.getElementById("statusText").textContent =

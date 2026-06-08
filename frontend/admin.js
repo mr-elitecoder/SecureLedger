@@ -30,7 +30,7 @@ async function loadAlerts() {
     if (!data.success) return;
     const alerts = data.alerts;
     document.getElementById("statAlerts").textContent = alerts.filter(
-      (a) => !a.is_reviewed,
+      (a) => !a.IS_REVIEWED,
     ).length;
     const tbody = document.getElementById("alertsBody");
     if (!alerts.length) {
@@ -42,26 +42,26 @@ async function loadAlerts() {
       .map(
         (a) => `
                 <tr>
-                    <td><strong>${a.flagged_user}</strong><div class="sub">${
-                      a.flagged_email
+                    <td><strong>${a.FLAGGED_USER}</strong><div class="sub">${
+                      a.FLAGGED_EMAIL
                     }</div></td>
                     <td style="color:var(--warn);font-weight:500;max-width:180px">${
-                      a.reason
+                      a.REASON
                     }</td>
                     <td><span class="badge ${a.severity}">${
-                      a.severity
+                      a.SEVERITY
                     }</span></td>
                     <td style="font-weight:700;color:var(--danger)">PKR ${Number(
-                      a.amount,
+                      a.AMOUNT,
                     ).toLocaleString()}</td>
                     <td style="color:var(--muted)">${new Date(
-                      a.created_at,
+                      a.CREATED_AT,
                     ).toLocaleString("en-PK", {
                       dateStyle: "short",
                       timeStyle: "short",
                     })}</td>
                     <td>${
-                      a.is_reviewed
+                      a.IS_REVIEWED
                         ? '<span class="badge reviewed">Reviewed</span>'
                         : `<button class="btn-sm btn-review" onclick="reviewAlert(${a.alert_id},this)">Mark Reviewed</button>`
                     }</td>
@@ -102,10 +102,10 @@ async function loadUsers() {
     const users = data.users;
     document.getElementById("statUsers").textContent = users.length;
     document.getElementById("statActive").textContent = users.filter(
-      (u) => u.is_active,
+      (u) => u.IS_ACTIVE,
     ).length;
     document.getElementById("statFlagged").textContent = users.filter(
-      (u) => u.total_fraud_flags > 0,
+      (u) => u.TOTAL_FRAUD_FLAGS > 0,
     ).length;
     document.getElementById("usersBody").innerHTML = users
       .map(
@@ -125,7 +125,7 @@ async function loadUsers() {
                       u.is_active ? "active" : "inactive"
                     }">${u.is_active ? "Active" : "Inactive"}</span></td>
                     <td>${
-                      u.role === "admin"
+                      u.ROLE === "admin"
                         ? '<span style="color:var(--muted);font-size:12px">—</span>'
                         : `<button class="btn-sm btn-toggle" onclick="toggleUser(${
                             u.user_id
@@ -180,7 +180,7 @@ async function loadAudit() {
                       l.action_type
                     }</span></td>
                     <td style="color:var(--muted)">${l.target_table || "—"} ${
-                      l.target_id ? "#" + l.target_id : ""
+                      l.taget_id ? "#" + l.target_id : ""
                     }</td>
                     <td style="color:var(--text2);font-size:12px">${
                       l.notes || "—"

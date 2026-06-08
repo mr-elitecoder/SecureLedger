@@ -103,13 +103,14 @@ npm install
 Create `backend/.env`:
 
 ```env
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=secureledger
+DB_USER=your_db_username
+DB_PASSWORD=your_db_password
+DB_CONNECT_STRING=localhost:1521/ORCLPDB1
 JWT_SECRET=your_jwt_secret
 JWT_EXPIRES_IN=1d
 PORT=5000
+# Optional: Oracle Instant Client directory path
+# ORACLE_CLIENT_LIB_DIR=C:\oracle\instantclient_19_12
 ```
 
 ---
