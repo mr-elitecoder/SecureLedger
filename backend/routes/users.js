@@ -6,10 +6,16 @@ router.use(verifyToken);
 router.get("/list", async (req, res) => {
   try {
     const [rows] = await query(
-      `SELECT user_id, full_name, email FROM users WHERE is_active = 1 AND role = 'user' AND user_id != ? ORDER BY full_name ASC`,
+      `SELECT USER_ID, FULL_NAME, EMAIL FROM users WHERE IS_ACTIVE = 1 AND ROLE = 'user' AND USER_ID != ? ORDER BY FULL_NAME ASC`,
       [req.user.user_id],
     );
-    return res.status(200).json({ success: true, users: rows });
+    const formattedUsers = rows.map((user) => ({
+      user_id: user.USER_ID,
+      full_name: user.FULL_NAME,
+      email: user.EMAIL,
+    }));
+    console.log(formattedUsers);
+    return res.status(200).json({ success: true, users: formattedUsers });
   } catch (err) {
     console.error("User list error:", err.message);
     return res
@@ -17,9 +23,10 @@ router.get("/list", async (req, res) => {
       .json({ success: false, message: "Could not fetch users." });
   }
 });
+
 router.get("/me/balance", async (req, res) => {
   try {
-    const [rows] = await query("SELECT balance FROM users WHERE user_id = ?", [
+    const [rows] = await query("SELECT BALANCE FROM users WHERE USER_ID = ?", [
       req.user.user_id,
     ]);
     const row = rows[0];
@@ -27,7 +34,7 @@ router.get("/me/balance", async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Balance not found." });
-    return res.status(200).json({ success: true, balance: row.balance });
+    return res.status(200).json({ success: true, balance: row.BALANCE });
   } catch (err) {
     console.error("Balance fetch error:", err.message);
     return res
@@ -47,18 +54,16 @@ router.get("/me/summary", async (req, res) => {
       "SELECT COUNT(*) AS flagged_count FROM fraud_alerts WHERE user_id = ?",
       [user_id],
     );
-    const flagged = flaggedRows[0] || { flagged_count: 0 };
-    return res
-      .status(200)
-      .json({
-        success: true,
-        summary: {
-          total_sent: Number(summary.total_sent),
-          total_received: Number(summary.total_received),
-          transaction_count: Number(summary.transaction_count),
-          flagged_count: Number(flagged.flagged_count),
-        },
-      });
+    const flagged = flaggedRows[0] || { FLAGGED_COUNT: 0 };
+    return res.status(200).json({
+      success: true,
+      summary: {
+        total_sent: Number(summary.TOTAL_SENT || 0),
+        total_received: Number(summary.TOTAL_RECEIVED || 0),
+        transaction_count: Number(summary.TRANSACTION_COUNT || 0),
+        flagged_count: Number(flagged.FLAGGED_COUNT || 0),
+      },
+    });
   } catch (err) {
     console.error("Dashboard summary error:", err.message);
     return res
@@ -77,12 +82,19 @@ router.get("/me/trends", async (req, res) => {
       `SELECT status, COUNT(*) AS count FROM transactions WHERE sender_id = ? OR receiver_id = ? GROUP BY status`,
       [user_id, user_id],
     );
-    return res
-      .status(200)
-      .json({
-        success: true,
-        trends: { daily: dailyRows, status_breakdown: statusRows },
-      });
+    const formattedDaily = dailyRows.map((row) => ({
+      day: row.DAY,
+      sent: row.SENT,
+      received: row.RECEIVED,
+    }));
+    const formattedStatus = statusRows.map((row) => ({
+      status: row.STATUS,
+      count: row.COUNT,
+    }));
+    return res.status(200).json({
+      success: true,
+      trends: { daily: formattedDaily, status_breakdown: formattedStatus },
+    });
   } catch (err) {
     console.error("Dashboard trends error:", err.message);
     return res
@@ -95,10 +107,15 @@ router.get("/search", async (req, res) => {
   if (q.length < 2) return res.status(200).json({ success: true, users: [] });
   try {
     const [rows] = await query(
-      `SELECT user_id, full_name, email FROM users WHERE is_active = 1 AND role = 'user' AND user_id != ? AND (full_name LIKE ? OR email LIKE ?) FETCH FIRST 8 ROWS ONLY`,
+      `SELECT USER_ID, FULL_NAME, EMAIL FROM users WHERE IS_ACTIVE = 1 AND ROLE = 'user' AND USER_ID != ? AND (UPPER(FULL_NAME) LIKE UPPER(?) OR UPPER(EMAIL) LIKE UPPER(?)) FETCH FIRST 8 ROWS ONLY`,
       [req.user.user_id, `%${q}%`, `%${q}%`],
     );
-    return res.status(200).json({ success: true, users: rows });
+    const formattedUsers = rows.map((user) => ({
+      user_id: user.USER_ID,
+      full_name: user.FULL_NAME,
+      email: user.EMAIL,
+    }));
+    return res.status(200).json({ success: true, users: formattedUsers });
   } catch (err) {
     console.error("Search error:", err.message);
     return res.status(500).json({ success: false, message: "Search failed." });

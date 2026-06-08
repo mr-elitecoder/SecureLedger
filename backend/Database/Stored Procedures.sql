@@ -1,41 +1,10 @@
--- ============================================================
---  SecureLedger — Stored Procedures + Indexes
---  Database  : Oracle (PL/SQL)
---  Schema    : secureled
---  Version   : 3.0  (v2.0 bugs fixed)
--- ============================================================
---
---  BUGS FIXED IN THIS VERSION (v2 → v3)
---  -----------------------------------------------------------
---  BUG 1 [CRITICAL] : ROWNUM applied before ORDER BY
---      get_transaction_history fraud_reason subquery used:
---          WHERE ROWNUM = 1 ... ORDER BY severity
---      In Oracle, ROWNUM is assigned BEFORE ORDER BY executes.
---      So it was returning a random row, not the highest severity.
---      Fix: wrap in inner subquery, apply ROWNUM in outer query.
---
---  BUG 2 [MEDIUM] : COUNT(*) FOR UPDATE does not lock rows
---      Receiver existence check used SELECT COUNT(*) FOR UPDATE.
---      Oracle silently ignores FOR UPDATE on aggregate queries.
---      No row lock was actually acquired.
---      Fix: replaced with SELECT 1 FOR UPDATE + NO_DATA_FOUND handler.
---
---  BUG 3 [MEDIUM] : get_fraud_dashboard returned duplicate rows
---      Direct JOIN fraud_alerts returned one row per alert.
---      A flagged txn with 3 alerts showed up 3 times.
---      Fix: use GROUP BY with MAX severity aggregation.
---
---  BUG 4 [LOW] : Test block FETCH column count mismatch
---      Cursor SELECT returns 8 columns but FETCH INTO had 6 vars.
---      Would throw ORA-00932 at runtime.
---      Fix: added v_description and v_created_at variables.
---
--- ============================================================
-    -- Create an application user for SecureLedger
--- Run this as a DBA (e.g., SYSTEM) in SQL Developer.
 
--- Replace PASSWORD_HERE with a strong password and run the script.
-CREATE USER aapuser IDENTIFIED BY Innovators;
+show con_name;
+alter session set container = XEPDB1;
+CREATE USER secureledger IDENTIFIED BY Innovators;
+SELECT username
+FROM dba_users
+WHERE username = 'SECURELEDGER';
 
 -- Minimal recommended grants for application use:
 GRANT CREATE SESSION TO appuser;
@@ -64,13 +33,17 @@ GRANT CREATE TYPE TO appuser;
 -- SEQUENCE for transactions PK
 -- Safe version: only creates if it doesn't already exist
 -- ============================================================
+-- Step 1: Enable output
+SET SERVEROUTPUT ON;
+
+-- Step 2: Run your block (select all and press F5)
 DECLARE
     v_count NUMBER;
 BEGIN
     SELECT COUNT(*) INTO v_count
     FROM user_sequences
     WHERE sequence_name = 'TXN_SEQ';
-
+    
     IF v_count = 0 THEN
         EXECUTE IMMEDIATE '
             CREATE SEQUENCE txn_seq
@@ -85,7 +58,6 @@ BEGIN
     END IF;
 END;
 /
-
 
 -- ============================================================
 -- PROCEDURE 1: transfer_funds

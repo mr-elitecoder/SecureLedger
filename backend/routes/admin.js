@@ -10,7 +10,7 @@ router.use(verifyToken, adminOnly);
 router.get("/analytics/overview", async (req, res) => {
   try {
     const [userRows] = await query(
-      `SELECT COUNT(*) AS total_users, SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_users, SUM(CASE WHEN fa_count > 0 THEN 1 ELSE 0 END) AS flagged_users FROM ( SELECT u.user_id, u.is_active, COUNT(fa.alert_id) AS fa_count FROM users u LEFT JOIN fraud_alerts fa ON fa.user_id = u.user_id GROUP BY u.user_id ) user_flags`,
+      `SELECT COUNT(*) AS total_users, SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_users, SUM(CASE WHEN fa_count > 0 THEN 1 ELSE 0 END) AS flagged_users FROM ( SELECT u.user_id, u.is_active, COUNT(fa.alert_id) AS fa_count FROM users u LEFT JOIN fraud_alerts fa ON fa.user_id = u.user_id GROUP BY u.user_id, u.is_active ) user_flags`,
     );
     const userStats = userRows[0] || {};
     const [txnRows] = await query(
@@ -28,7 +28,7 @@ router.get("/analytics/overview", async (req, res) => {
       `SELECT TRUNC(created_at) AS day, COUNT(*) AS count FROM fraud_alerts GROUP BY TRUNC(created_at) ORDER BY day ASC FETCH FIRST 14 ROWS ONLY`,
     );
     const [topUsers] = await query(
-      `SELECT u.user_id, u.full_name, u.email, COUNT(fa.alert_id) AS flags FROM users u JOIN fraud_alerts fa ON fa.user_id = u.user_id GROUP BY u.user_id ORDER BY flags DESC FETCH FIRST 5 ROWS ONLY`,
+      `SELECT u.user_id, u.full_name, u.email, COUNT(fa.alert_id) AS flags FROM users u JOIN fraud_alerts fa ON fa.user_id = u.user_id GROUP BY u.user_id, u.full_name, u.email ORDER BY flags DESC FETCH FIRST 5 ROWS ONLY`,
     );
     return res.status(200).json({
       success: true,
@@ -80,7 +80,7 @@ router.get("/fraud-alerts", async (req, res) => {
 // ─────────────────────────────────────────
 router.put("/fraud-alerts/:id/review", async (req, res) => {
   const alert_id = parseInt(req.params.id);
-  const reviewer_id = req.user.user_id;
+  const reviewer_id = req.user.USER_ID;
 
   try {
     const result = await execute(
@@ -118,9 +118,19 @@ router.put("/fraud-alerts/:id/review", async (req, res) => {
 router.get("/users", async (req, res) => {
   try {
     const [rows] = await query(
-      `SELECT u.user_id, u.full_name, u.email, u.balance, u.role, u.is_active, u.created_at, COUNT(fa.alert_id) AS total_fraud_flags FROM users u LEFT JOIN fraud_alerts fa ON fa.user_id = u.user_id GROUP BY u.user_id ORDER BY u.created_at DESC`,
+      `SELECT u.user_id, u.full_name, u.email, u.balance, u.role, u.is_active, u.created_at, COUNT(fa.alert_id) AS total_fraud_flags FROM users u LEFT JOIN fraud_alerts fa ON fa.user_id = u.user_id GROUP BY u.user_id, u.full_name, u.email, u.balance, u.role, u.is_active, u.created_at ORDER BY u.created_at DESC`,
     );
-    return res.status(200).json({ success: true, users: rows });
+    const formattedRows = rows.map((row) => ({
+      user_id: row.USER_ID,
+      full_name: row.FULL_NAME,
+      email: row.EMAIL,
+      balance: row.BALANCE,
+      role: row.ROLE,
+      is_active: row.IS_ACTIVE,
+      created_at: row.CREATED_AT,
+      total_fraud_flags: row.TOTAL_FRAUD_FLAGS,
+    }));
+    return res.status(200).json({ success: true, users: formattedRows });
   } catch (err) {
     console.error("Get users error:", err.message);
     return res.status(500).json({ success: false, message: "Server error." });
@@ -132,7 +142,7 @@ router.get("/users", async (req, res) => {
 // ─────────────────────────────────────────
 router.put("/users/:id/toggle-status", async (req, res) => {
   const target_user_id = parseInt(req.params.id);
-  const admin_id = req.user.user_id;
+  const admin_id = req.user.USER_ID;
 
   // Admin cannot deactivate themselves
   if (target_user_id === admin_id) {
@@ -162,9 +172,10 @@ router.put("/users/:id/toggle-status", async (req, res) => {
       "INSERT INTO audit_log (actor_id, action_type, target_table, target_id, notes) VALUES (?, ?, ?, ?, ?)",
       [
         admin_id,
-        user.is_active ? "ACTIVATE_USER" : "DEACTIVATE_USER",
+        user.IS_ACTIVE ? "ACTIVATE_USER" : "DEACTIVATE_USER",
+        "users",
         target_user_id,
-        user.is_active
+        user.IS_ACTIVE
           ? "Admin activated user account"
           : "Admin deactivated user account",
       ],
@@ -172,7 +183,7 @@ router.put("/users/:id/toggle-status", async (req, res) => {
     );
     return res.status(200).json({
       success: true,
-      message: `User account ${user.is_active ? "activated" : "deactivated"} successfully.`,
+      message: `User account ${user.IS_ACTIVE ? "activated" : "deactivated"} successfully.`,
     });
   } catch (err) {
     console.error("Toggle user status error:", err.message);
@@ -188,10 +199,20 @@ router.get("/audit-log", async (req, res) => {
 
   try {
     const [rows] = await query(
-      "SELECT al.log_id, al.action_type, al.target_table, al.target_id, al.notes, al.created_at, u.full_name AS actor_name, u.email AS actor_email FROM audit_log al LEFT JOIN users u ON al.actor_id = u.user_id ORDER BY al.created_at DESC FETCH FIRST ? ROWS ONLY",
+      "SELECT al.log_id, al.action_type, al.target_table, al.target_id, al.notes, al.created_at, u.full_name AS actor_name, u.email AS actor_email FROM audit_log al LEFT JOIN users u ON al.actor_id = u.user_id GROUP BY al.log_id, al.action_type, al.target_table, al.target_id, al.notes, al.created_at, u.full_name, u.email ORDER BY al.created_at DESC FETCH FIRST ? ROWS ONLY",
       [limit],
     );
-    return res.status(200).json({ success: true, logs: rows });
+    const formattedRows = rows.map((row) => ({
+      log_id: row.LOG_ID,
+      action_type: row.ACTION_TYPE,
+      target_table: row.TARGET_TABLE,
+      target_id: row.TARGET_ID,
+      notes: row.NOTES,
+      created_at: row.CREATED_AT,
+      actor_name: row.ACTOR_NAME,
+      actor_email: row.ACTOR_EMAIL,
+    }));
+    return res.status(200).json({ success: true, logs: formattedRows });
   } catch (err) {
     console.error("Audit log error:", err.message);
     return res.status(500).json({ success: false, message: "Server error." });

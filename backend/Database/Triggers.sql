@@ -6,7 +6,19 @@
 --  Version   : 2.0  (all 8 fraud-detection rules)
 -- ============================================================
 
+SELECT * FROM transactions;
+SELECT * FROM fraud_alerts;
+SELECT * FROM audit_log;
+SELECT * FROM users;
 
+
+INSERT INTO transactions VALUES (304,1,3,60000,'safe','test', '::1', SYSTIMESTAMP);
+commit;
+
+
+
+DELETE FROM transactions 
+where txn_id = 1;
 
 -- ============================================================
 -- FRAUD RULE SUMMARY
@@ -161,177 +173,138 @@ END;
 -- fraud_alerts row per rule that fired.  Keeping evaluation
 -- logic only in 1A ensures we never double-count.
 -- ============================================================
+CREATE SEQUENCE fraud_alerts_seq
+START WITH 1
+INCREMENT BY 1
+NOCACHE
+NOCYCLE;
+/
+
 CREATE OR REPLACE TRIGGER after_transaction_insert
-AFTER INSERT ON transactions
-FOR EACH ROW
-DECLARE
-    v_recent_1min       NUMBER := 0;
-    v_daily_count       NUMBER := 0;
-    v_last_txn_date     DATE;
-    v_days_inactive     NUMBER := 0;
-    v_avg_amount        NUMBER := 0;
-    v_same_rcv_count    NUMBER := 0;
-    v_receiver_count    NUMBER := 0;
+FOR INSERT ON transactions
+COMPOUND TRIGGER
+
+    TYPE t_row IS RECORD (
+        txn_id      transactions.txn_id%TYPE,
+        sender_id   transactions.sender_id%TYPE,
+        receiver_id transactions.receiver_id%TYPE,
+        amount      transactions.amount%TYPE,
+        status      transactions.status%TYPE,
+        created_at  transactions.created_at%TYPE
+    );
+
+    TYPE t_tab IS TABLE OF t_row INDEX BY PLS_INTEGER;
+    g_data t_tab;
+
+    i PLS_INTEGER := 0;
+
+-- ===============================
+-- ROW LEVEL (NO SQL HERE)
+-- ===============================
+AFTER EACH ROW IS
+BEGIN
+    IF :NEW.status = 'flagged' THEN
+        i := i + 1;
+
+        g_data(i).txn_id      := :NEW.txn_id;
+        g_data(i).sender_id   := :NEW.sender_id;
+        g_data(i).receiver_id := :NEW.receiver_id;
+        g_data(i).amount      := :NEW.amount;
+        g_data(i).status      := :NEW.status;
+        g_data(i).created_at  := :NEW.created_at;
+    END IF;
+END AFTER EACH ROW;
+
+-- ===============================
+-- STATEMENT LEVEL (SAFE SQL)
+-- ===============================
+AFTER STATEMENT IS
+    v_cnt NUMBER;
 BEGIN
 
-    -- Only proceed if the transaction was flagged
-    IF :NEW.status != 'flagged' THEN
-        RETURN;
-    END IF;
+    FOR j IN 1 .. g_data.COUNT LOOP
 
-    -- --------------------------------------------------------
-    -- Rule 1 alert: Large transaction
-    -- --------------------------------------------------------
-    IF :NEW.amount > 50000 THEN
-        INSERT INTO fraud_alerts (txn_id, user_id, reason, severity)
-        VALUES (
-            :NEW.txn_id,
-            :NEW.sender_id,
-            'Large transaction amount exceeded 50,000',
-            'high'
-        );
-    END IF;
-
-    -- --------------------------------------------------------
-    -- Rule 2 alert: Rapid successive transactions
-    -- Exclude the just-inserted row from the count.
-    -- --------------------------------------------------------
-    SELECT COUNT(*)
-    INTO   v_recent_1min
-    FROM   transactions
-    WHERE  sender_id  = :NEW.sender_id
-      AND  created_at >= SYSTIMESTAMP - INTERVAL '1' MINUTE
-      AND  txn_id    != :NEW.txn_id;
-
-    IF v_recent_1min >= 2 THEN
-        INSERT INTO fraud_alerts (txn_id, user_id, reason, severity)
-        VALUES (
-            :NEW.txn_id,
-            :NEW.sender_id,
-            'Rapid successive transactions — 3 or more within 1 minute',
-            'medium'
-        );
-    END IF;
-
-    -- --------------------------------------------------------
-    -- Rule 3 alert: Dormant account sudden activity
-    -- --------------------------------------------------------
-    SELECT MAX(CAST(created_at AS DATE))
-    INTO   v_last_txn_date
-    FROM   transactions
-    WHERE  sender_id  = :NEW.sender_id
-      AND  txn_id    != :NEW.txn_id;
-
-    IF v_last_txn_date IS NOT NULL THEN
-        v_days_inactive := SYSDATE - v_last_txn_date;
-        IF v_days_inactive > 30 AND :NEW.amount > 10000 THEN
-            INSERT INTO fraud_alerts (txn_id, user_id, reason, severity)
-            VALUES (
-                :NEW.txn_id,
-                :NEW.sender_id,
-                'Dormant account active after ' || FLOOR(v_days_inactive) || ' days with high-value transfer',
-                'high'
-            );
+        -- RULE 1: High amount
+        IF g_data(j).amount > 50000 THEN
+            INSERT INTO fraud_alerts
+            (alert_id, txn_id, user_id, reason, severity, is_reviewed, reviewed_by, reviewed_at, created_at)
+            VALUES
+            (fraud_alerts_seq.NEXTVAL,
+             g_data(j).txn_id,
+             g_data(j).sender_id,
+             'Large transaction amount exceeded threshold',
+             'high',
+             0, NULL, NULL,
+             SYSTIMESTAMP);
         END IF;
-    END IF;
 
-    -- --------------------------------------------------------
-    -- Rule 4 alert: Round-number structuring
-    -- --------------------------------------------------------
-    IF MOD(:NEW.amount, 10000) = 0 AND :NEW.amount >= 10000 THEN
-        INSERT INTO fraud_alerts (txn_id, user_id, reason, severity)
-        VALUES (
-            :NEW.txn_id,
-            :NEW.sender_id,
-            'Round-number structuring pattern detected — amount is exact multiple of 10,000',
-            'low'
-        );
-    END IF;
+        -- RULE 2: Daily velocity
+        SELECT COUNT(*)
+        INTO v_cnt
+        FROM transactions
+        WHERE sender_id = g_data(j).sender_id
+          AND created_at >= SYSTIMESTAMP - INTERVAL '24' HOUR;
 
-    -- --------------------------------------------------------
-    -- Rule 5 alert: High daily velocity
-    -- --------------------------------------------------------
-    SELECT COUNT(*)
-    INTO   v_daily_count
-    FROM   transactions
-    WHERE  sender_id  = :NEW.sender_id
-      AND  created_at >= SYSTIMESTAMP - INTERVAL '24' HOUR
-      AND  txn_id    != :NEW.txn_id;
+        IF v_cnt >= 10 THEN
+            INSERT INTO fraud_alerts
+            VALUES
+            (fraud_alerts_seq.NEXTVAL,
+             g_data(j).txn_id,
+             g_data(j).sender_id,
+             'High daily velocity detected',
+             'medium',
+             0, NULL, NULL,
+             SYSTIMESTAMP);
+        END IF;
 
-    IF v_daily_count >= 10 THEN
-        INSERT INTO fraud_alerts (txn_id, user_id, reason, severity)
-        VALUES (
-            :NEW.txn_id,
-            :NEW.sender_id,
-            'High daily velocity — sender has made ' || v_daily_count || ' transactions in the past 24 hours',
-            'medium'
-        );
-    END IF;
+        -- RULE 3: Round amount pattern
+        IF MOD(g_data(j).amount, 10000) = 0 AND g_data(j).amount >= 10000 THEN
+            INSERT INTO fraud_alerts
+            VALUES
+            (fraud_alerts_seq.NEXTVAL,
+             g_data(j).txn_id,
+             g_data(j).sender_id,
+             'Round-number structuring detected',
+             'low',
+             0, NULL, NULL,
+             SYSTIMESTAMP);
+        END IF;
 
-    -- --------------------------------------------------------
-    -- Rule 6 alert: Amount anomaly vs. personal average
-    -- --------------------------------------------------------
-    SELECT NVL(AVG(amount), 0)
-    INTO   v_avg_amount
-    FROM   transactions
-    WHERE  sender_id  = :NEW.sender_id
-      AND  txn_id    != :NEW.txn_id;
+        -- RULE 4: First time receiver high value
+        SELECT COUNT(*)
+        INTO v_cnt
+        FROM transactions
+        WHERE sender_id = g_data(j).sender_id
+          AND receiver_id = g_data(j).receiver_id;
 
-    IF v_avg_amount > 0 AND :NEW.amount > (v_avg_amount * 5) THEN
-        INSERT INTO fraud_alerts (txn_id, user_id, reason, severity)
-        VALUES (
-            :NEW.txn_id,
-            :NEW.sender_id,
-            'Amount anomaly — transaction is more than 5x the sender personal average of ' || ROUND(v_avg_amount, 2),
-            'high'
-        );
-    END IF;
+        IF v_cnt = 1 AND g_data(j).amount > 20000 THEN
+            INSERT INTO fraud_alerts
+            VALUES
+            (fraud_alerts_seq.NEXTVAL,
+             g_data(j).txn_id,
+             g_data(j).sender_id,
+             'First-time high value transfer to receiver',
+             'high',
+             0, NULL, NULL,
+             SYSTIMESTAMP);
+        END IF;
 
-    -- --------------------------------------------------------
-    -- Rule 7 alert: Repeated same-receiver rapid transfers
-    -- --------------------------------------------------------
-    SELECT COUNT(*)
-    INTO   v_same_rcv_count
-    FROM   transactions
-    WHERE  sender_id   = :NEW.sender_id
-      AND  receiver_id = :NEW.receiver_id
-      AND  created_at >= SYSTIMESTAMP - INTERVAL '10' MINUTE
-      AND  txn_id     != :NEW.txn_id;
+    END LOOP;
 
-    IF v_same_rcv_count >= 3 THEN
-        INSERT INTO fraud_alerts (txn_id, user_id, reason, severity)
-        VALUES (
-            :NEW.txn_id,
-            :NEW.sender_id,
-            'Smurfing pattern — ' || v_same_rcv_count || ' transfers to same receiver within 10 minutes',
-            'medium'
-        );
-    END IF;
-
-    -- --------------------------------------------------------
-    -- Rule 8 alert: New receiver + large amount
-    -- --------------------------------------------------------
-    SELECT COUNT(*)
-    INTO   v_receiver_count
-    FROM   transactions
-    WHERE  sender_id   = :NEW.sender_id
-      AND  receiver_id = :NEW.receiver_id
-      AND  txn_id     != :NEW.txn_id;
-
-    IF v_receiver_count = 0 AND :NEW.amount > 20000 THEN
-        INSERT INTO fraud_alerts (txn_id, user_id, reason, severity)
-        VALUES (
-            :NEW.txn_id,
-            :NEW.sender_id,
-            'First-time transfer to unverified receiver with high-value amount',
-            'high'
-        );
-    END IF;
+END AFTER STATEMENT;
 
 END;
 /
+INSERT INTO transactions
+(txn_id, sender_id, receiver_id, amount, status, description, ip_address, created_at)
+VALUES
+(201,1,3,1400,'flagged','High Value Transfer','::1',SYSTIMESTAMP);
 
+INSERT INTO transactions VALUES
+(202,1,3,2200,'flagged','Suspicious Transfer','::1',SYSTIMESTAMP);
 
+INSERT INTO transactions VALUES
+(203,3,1,1800,'flagged','Unusual Activity','::1',SYSTIMESTAMP);
 -- ============================================================
 -- TRIGGER 2 : prevent_audit_delete
 -- Immutability guarantee — no row in audit_log can ever be

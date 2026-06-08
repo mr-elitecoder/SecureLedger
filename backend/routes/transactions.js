@@ -3,9 +3,10 @@ import { query, execute, oracledb } from "../config/db.js";
 import { verifyToken } from "../middleware/auth.js";
 const router = express.Router();
 router.use(verifyToken);
+
 router.post("/transfer", async (req, res) => {
   const { receiver_id, amount, description } = req.body;
-  const sender_id = req.user.user_id;
+  const SENDER_ID = req.user.user_id;
   const ip_address = req.ip || req.connection?.remoteAddress;
   if (!receiver_id || !amount)
     return res
@@ -15,15 +16,15 @@ router.post("/transfer", async (req, res) => {
     return res
       .status(400)
       .json({ success: false, message: "Amount must be a positive number." });
-  if (parseInt(receiver_id) === sender_id)
+  if (parseInt(receiver_id) === SENDER_ID)
     return res
       .status(400)
       .json({ success: false, message: "Cannot transfer to yourself." });
   try {
     const result = await execute(
-      `BEGIN transfer_funds(:sender_id, :receiver_id, :amount, :description, :ip_address, :result); END;`,
+      `BEGIN transfer_funds(:SENDER_ID, :receiver_id, :amount, :description, :ip_address, :result); END;`,
       {
-        sender_id,
+        SENDER_ID,
         receiver_id: parseInt(receiver_id, 10),
         amount: parseFloat(amount),
         description: description || null,
@@ -44,44 +45,87 @@ router.post("/transfer", async (req, res) => {
   }
 });
 router.get("/history", async (req, res) => {
-  const user_id = req.user.user_id;
-  const limit = parseInt(req.query.limit, 10) || 20;
+  const USER_ID = req.user.user_id;
+  // console.log(typeof USER_ID);
+  const p_limit = parseInt(req.query.p_limit, 10) || 20;
+  // console.log(p_limit);
+  let connection;
+  let result;
+  let resultSet;
   try {
-    const result = await execute(
-      `BEGIN get_transaction_history(:user_id, :limit, :cursor); END;`,
+    // Get a dedicated connection for ResultSet
+    connection = await oracledb.getConnection();
+    // console.log("im ok");
+
+    // yha per fetch array size set kr skta hoon but not in getRows method
+    result = await connection.execute(
+      `BEGIN get_transaction_history(:USER_ID, :p_limit, :cursor); END;`,
       {
-        user_id,
-        limit,
+        USER_ID,
+        p_limit,
         cursor: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR },
       },
     );
-    const resultSet = result.outBinds.cursor;
-    const transactions = await resultSet.getRows(limit);
+
+    resultSet = result.outBinds.cursor;
+    // console.log(resultSet);
+
+    // Check if ResultSet is valid
+    if (!resultSet) {
+      throw new Error("No cursor returned from procedure");
+    }
+
+    // Fetch rows with proper options
+    const transactions = await resultSet.getRows(p_limit);
+    // console.log(transactions);
+    // Close ResultSet and connection
     await resultSet.close();
-    return res.status(200).json({ success: true, transactions });
+    await connection.close();
+
+    // Format the response aur is ki need nhi ab
+    /*const formattedTransactions = transactions.map((row) => ({
+      txn_id: row[0],
+      amount: row[1],
+      status: row[2],
+      description: row[3],
+      created_at: row[4],
+      direction: row[5],
+      counterparty: row[6],
+      fraud_reason: row[7],
+    }));
+*/
+    const formattedTransactions = transactions;
+    console.log(formattedTransactions);
+
+    return res.status(200).json({
+      success: true,
+      transactions: formattedTransactions,
+      count: formattedTransactions.length,
+    });
   } catch (err) {
-    console.error("History error:", err.message);
-    return res
-      .status(500)
-      .json({ success: false, message: "Could not fetch history." });
-  }
-});
-router.get("/:id", async (req, res) => {
-  const txn_id = parseInt(req.params.id, 10);
-  const user_id = req.user.user_id;
-  try {
-    const [rows] = await query(
-      `SELECT t.txn_id, t.amount, t.status, t.description, t.created_at, s.full_name AS sender_name, s.email AS sender_email, r.full_name AS receiver_name, r.email AS receiver_email, fa.reason AS fraud_reason, fa.severity AS fraud_severity FROM transactions t JOIN users s ON t.sender_id = s.user_id JOIN users r ON t.receiver_id = r.user_id LEFT JOIN fraud_alerts fa ON fa.txn_id = t.txn_id WHERE t.txn_id = ? AND (t.sender_id = ? OR t.receiver_id = ?)`,
-      [txn_id, user_id, user_id],
-    );
-    if (rows.length === 0)
-      return res
-        .status(404)
-        .json({ success: false, message: "Transaction not found." });
-    return res.status(200).json({ success: true, transaction: rows[0] });
-  } catch (err) {
-    console.error("Get transaction error:", err.message);
-    return res.status(500).json({ success: false, message: "Server error." });
+    console.error("History error:", err);
+
+    // Clean up resources
+    if (resultSet) {
+      try {
+        await resultSet.close();
+      } catch (cleanupErr) {
+        console.error("ResultSet cleanup error:", cleanupErr);
+      }
+    }
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (cleanupErr) {
+        console.error("Connection cleanup error:", cleanupErr);
+      }
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Could not fetch history.",
+      error: err.message,
+    });
   }
 });
 export default router;
